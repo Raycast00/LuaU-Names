@@ -1,7 +1,9 @@
 --[[
-    Hologram ESP Library v3.1 - Text Glow Effect
-    - Glow on the text itself (not outline)
-    - Blur-like glow using multiple offset layers
+    Hologram ESP Library v2.2 - Clean version
+    - Animated gradient names
+    - Black outline
+    - Custom objects support
+    - No glow bullshit
 ]]
 
 local Players = game:GetService("Players")
@@ -18,13 +20,6 @@ local SETTINGS = {
     Size = 14,
     Outline = true,
     OutlineColor = Color3.fromRGB(0, 0, 0),
-    
-    -- Text Glow effect
-    GlowEnabled = true,
-    GlowIntensity = 4,          -- How many glow layers (1-8, more = smoother)
-    GlowSpread = 1.5,           -- How far glow spreads (pixels between layers)
-    GlowTransparency = 0.6,     -- Base transparency of glow layers
-    GlowColor = nil,            -- nil = use text color, or set custom Color3
     
     -- Animation
     Animated = true,
@@ -57,15 +52,13 @@ ESP.__index = ESP
 
 function ESP.new()
     local self = setmetatable({}, ESP)
-    self.CharTexts = {}          -- Main text (top layer)
-    self.OutlineTexts = {}       -- Black outline
-    self.GlowTexts = {}          -- Glow text layers (behind main text)
+    self.CharTexts = {}
+    self.OutlineTexts = {}
     self.Enabled = true
     self.Visible = true
     self.Settings = {}
     self.GetPosition = nil
     self.GetText = nil
-    self.LastTextLength = 0
     return self
 end
 
@@ -76,39 +69,17 @@ function ESP:Cleanup()
     for _, text in ipairs(self.OutlineTexts) do
         pcall(function() text:Remove() end)
     end
-    for _, glowText in ipairs(self.GlowTexts) do
-        pcall(function() glowText:Remove() end)
-    end
     table.clear(self.CharTexts)
     table.clear(self.OutlineTexts)
-    table.clear(self.GlowTexts)
-    self.LastTextLength = 0
 end
 
-function ESP:EnsureCharCount(count, glowCount)
-    glowCount = glowCount or 0
-    
-    -- Main characters
+function ESP:EnsureCharCount(count)
     while #self.CharTexts > count do
         pcall(function() table.remove(self.CharTexts):Remove() end)
-    end
-    while #self.CharTexts < count do
-        local text = Drawing.new("Text")
-        text.Font = SETTINGS.Font
-        text.Size = SETTINGS.Size
-        text.Outline = true
-        text.OutlineColor = Color3.fromRGB(0, 0, 0)
-        text.Center = true
-        text.Visible = false
-        text.ZIndex = 10  -- Top layer
-        table.insert(self.CharTexts, text)
-    end
-    
-    -- Outlines (thin black border around main text)
-    while #self.OutlineTexts > count do
         pcall(function() table.remove(self.OutlineTexts):Remove() end)
     end
-    while #self.OutlineTexts < count do
+    
+    while #self.CharTexts < count do
         local outline = Drawing.new("Text")
         outline.Font = SETTINGS.Font
         outline.Size = SETTINGS.Size + 2
@@ -117,24 +88,15 @@ function ESP:EnsureCharCount(count, glowCount)
         outline.Outline = false
         outline.Center = true
         outline.Visible = false
-        outline.ZIndex = 9  -- Behind main text
         table.insert(self.OutlineTexts, outline)
-    end
-    
-    -- Glow text layers (rendered behind, offset in different directions)
-    -- Each layer is a full copy of the text, slightly offset and transparent
-    while #self.GlowTexts > glowCount do
-        pcall(function() table.remove(self.GlowTexts):Remove() end)
-    end
-    while #self.GlowTexts < glowCount do
-        local glow = Drawing.new("Text")
-        glow.Font = SETTINGS.Font
-        glow.Size = SETTINGS.Size
-        glow.Outline = false
-        glow.Center = true
-        glow.Visible = false
-        glow.ZIndex = 1  -- Far behind
-        table.insert(self.GlowTexts, glow)
+        
+        local text = Drawing.new("Text")
+        text.Font = SETTINGS.Font
+        text.Size = SETTINGS.Size
+        text.Outline = true
+        text.Center = true
+        text.Visible = false
+        table.insert(self.CharTexts, text)
     end
 end
 
@@ -176,15 +138,6 @@ function ESP:Render(now, camera)
     local animated = self.Settings.Animated
     if animated == nil then animated = SETTINGS.Animated end
     
-    local glowEnabled = self.Settings.GlowEnabled
-    if glowEnabled == nil then glowEnabled = SETTINGS.GlowEnabled end
-    
-    local glowIntensity = glowEnabled and (self.Settings.GlowIntensity or SETTINGS.GlowIntensity) or 0
-    glowIntensity = math.clamp(glowIntensity, 0, 8)
-    
-    local glowSpread = self.Settings.GlowSpread or SETTINGS.GlowSpread
-    local glowTransparency = self.Settings.GlowTransparency or SETTINGS.GlowTransparency
-    
     local camPos = camera.CFrame.Position
     local distance = (camPos - worldPosition).Magnitude
     if distance > maxDistance then
@@ -201,25 +154,7 @@ function ESP:Render(now, camera)
     end
     
     local textLength = math.min(#displayText, 64)
-    
-    -- We only need 1 glow text object (we'll render glow per-character differently)
-    self:EnsureCharCount(textLength, 0)  -- No extra glow text objects needed
-    self.LastTextLength = textLength
-    
-    -- But we need glow objects for each character
-    -- Actually, let's use a different approach: per-character glow layers
-    while #self.GlowTexts < (textLength * glowIntensity) do
-        local glow = Drawing.new("Text")
-        glow.Font = SETTINGS.Font
-        glow.Outline = false
-        glow.Center = true
-        glow.Visible = false
-        glow.ZIndex = 1
-        table.insert(self.GlowTexts, glow)
-    end
-    while #self.GlowTexts > (textLength * glowIntensity) do
-        pcall(function() table.remove(self.GlowTexts):Remove() end)
-    end
+    self:EnsureCharCount(textLength)
     
     local charWidth = SETTINGS.Size * 0.6
     local scale = math.clamp(1 - (distance / maxDistance), 0.3, 1)
@@ -232,83 +167,35 @@ function ESP:Render(now, camera)
     local color1 = self.Settings.Color1 or SETTINGS.Color1
     local color2 = self.Settings.Color2 or SETTINGS.Color2
     local staticColor = self.Settings.StaticColor or SETTINGS.StaticColor
-    local glowColor = self.Settings.GlowColor or SETTINGS.GlowColor
     
     local gradientPhase = (now * SETTINGS.GradientSpeed) % 1
     local isVisible = SETTINGS.Visible and SETTINGS.Enabled
     
-    -- Calculate colors for each character
-    local charColors = {}
     for i = 1, textLength do
+        local char = displayText:sub(i, i)
+        local charX = startX + (i - 1) * finalCharWidth
+        
+        local color
         if animated then
             local normalizedPos = textLength > 1 and (i - 1) / (textLength - 1) or 0.5
             local gradientPos = (normalizedPos + gradientPhase) % 1
-            charColors[i] = lerpColor(color1, color2, gradientPos)
+            color = lerpColor(color1, color2, gradientPos)
         else
-            charColors[i] = staticColor
+            color = staticColor
         end
-    end
-    
-    -- Hide all glow texts first
-    for _, glow in ipairs(self.GlowTexts) do
-        glow.Visible = false
-    end
-    
-    -- Render glow layers (behind main text, offset in different directions)
-    local glowIndex = 1
-    for charIdx = 1, textLength do
-        local char = displayText:sub(charIdx, charIdx)
-        local charX = startX + (charIdx - 1) * finalCharWidth
-        local charColor = glowColor or charColors[charIdx]
         
-        -- Create glow for this character with multiple offset layers
-        for layerIdx = 1, glowIntensity do
-            if glowIndex <= #self.GlowTexts then
-                local glow = self.GlowTexts[glowIndex]
-                
-                -- Calculate offset direction (spread out in circle pattern)
-                local angle = (layerIdx - 1) * (math.pi * 2 / glowIntensity)
-                local offsetX = math.cos(angle) * glowSpread * layerIdx * 0.5
-                local offsetY = math.sin(angle) * glowSpread * layerIdx * 0.5
-                
-                -- More transparent the further out
-                local layerAlpha = 1 - (layerIdx / glowIntensity) * glowTransparency
-                
-                glow.Position = Vector2.new(charX + offsetX, screenPos.Y + offsetY)
-                glow.Text = char
-                glow.Size = finalSize
-                glow.Color = charColor
-                glow.Transparency = 1 - layerAlpha
-                glow.Visible = isVisible
-                
-                glowIndex = glowIndex + 1
-            end
-        end
-    end
-    
-    -- Render outline
-    for i = 1, textLength do
         if self.OutlineTexts[i] then
-            local char = displayText:sub(i, i)
-            local charX = startX + (i - 1) * finalCharWidth
-            
             self.OutlineTexts[i].Position = Vector2.new(charX, screenPos.Y)
             self.OutlineTexts[i].Text = char
             self.OutlineTexts[i].Size = finalSize + 2
             self.OutlineTexts[i].Visible = isVisible
         end
-    end
-    
-    -- Render main text (on top)
-    for i = 1, textLength do
+        
         if self.CharTexts[i] then
-            local char = displayText:sub(i, i)
-            local charX = startX + (i - 1) * finalCharWidth
-            
             self.CharTexts[i].Position = Vector2.new(charX, screenPos.Y)
             self.CharTexts[i].Text = char
             self.CharTexts[i].Size = finalSize
-            self.CharTexts[i].Color = charColors[i]
+            self.CharTexts[i].Color = color
             self.CharTexts[i].Visible = isVisible
         end
     end
@@ -319,9 +206,6 @@ function ESP:Hide()
         if text then text.Visible = false end
     end
     for _, text in ipairs(self.OutlineTexts) do
-        if text then text.Visible = false end
-    end
-    for _, text in ipairs(self.GlowTexts) do
         if text then text.Visible = false end
     end
 end
@@ -455,75 +339,18 @@ end)
 -- ===== PUBLIC API =====
 local Library = {}
 
-function Library:SetEnabled(state)
-    SETTINGS.Enabled = state
-end
-
-function Library:SetVisible(state)
-    SETTINGS.Visible = state
-end
-
-function Library:SetAnimated(state)
-    SETTINGS.Animated = state
-end
-
-function Library:SetGradientSpeed(speed)
-    SETTINGS.GradientSpeed = speed
-end
-
-function Library:SetColors(color1, color2)
-    SETTINGS.Color1 = color1
-    SETTINGS.Color2 = color2
-end
-
-function Library:SetStaticColor(color)
-    SETTINGS.StaticColor = color
-end
-
-function Library:SetSize(size)
-    SETTINGS.Size = size
-end
-
-function Library:SetMaxDistance(dist)
-    SETTINGS.MaxDistance = dist
-end
-
-function Library:SetYOffset(offset)
-    SETTINGS.YOffset = offset
-end
-
-function Library:SetOutline(state)
-    SETTINGS.Outline = state
-end
-
-function Library:SetOutlineColor(color)
-    SETTINGS.OutlineColor = color
-end
-
--- Text Glow API
-function Library:SetGlowEnabled(state)
-    SETTINGS.GlowEnabled = state
-end
-
-function Library:SetGlowIntensity(intensity)
-    SETTINGS.GlowIntensity = math.clamp(intensity, 1, 8)
-end
-
-function Library:SetGlowSpread(spread)
-    SETTINGS.GlowSpread = math.clamp(spread, 0.5, 5)
-end
-
-function Library:SetGlowTransparency(transparency)
-    SETTINGS.GlowTransparency = math.clamp(transparency, 0, 1)
-end
-
-function Library:SetGlowColor(color)
-    SETTINGS.GlowColor = color
-end
-
-function Library:Destroy()
-    fullCleanup()
-end
+function Library:SetEnabled(state) SETTINGS.Enabled = state end
+function Library:SetVisible(state) SETTINGS.Visible = state end
+function Library:SetAnimated(state) SETTINGS.Animated = state end
+function Library:SetGradientSpeed(speed) SETTINGS.GradientSpeed = speed end
+function Library:SetColors(color1, color2) SETTINGS.Color1 = color1; SETTINGS.Color2 = color2 end
+function Library:SetStaticColor(color) SETTINGS.StaticColor = color end
+function Library:SetSize(size) SETTINGS.Size = size end
+function Library:SetMaxDistance(dist) SETTINGS.MaxDistance = dist end
+function Library:SetYOffset(offset) SETTINGS.YOffset = offset end
+function Library:SetOutline(state) SETTINGS.Outline = state end
+function Library:SetOutlineColor(color) SETTINGS.OutlineColor = color end
+function Library:Destroy() fullCleanup() end
 
 -- ===== CUSTOM ESP API =====
 Library.Custom = {}
@@ -550,11 +377,10 @@ function Library.Custom:Add(options)
         local obj = options.Object
         esp.GetPosition = function()
             if not obj or not obj.Parent then return nil end
-            if obj:IsA("BasePart") then
-                return obj.Position
-            elseif obj:IsA("Model") then
-                local primary = obj.PrimaryPart
-                return primary and primary.Position
+            if obj:IsA("BasePart") then return obj.Position end
+            if obj:IsA("Model") then
+                local p = obj.PrimaryPart
+                return p and p.Position
             end
             return nil
         end
@@ -576,99 +402,51 @@ function Library.Custom:Add(options)
     if options.Enabled ~= nil then esp.Enabled = options.Enabled end
     if options.Visible ~= nil then esp.Visible = options.Visible end
     
-    -- Glow settings
-    if options.GlowEnabled ~= nil then esp.Settings.GlowEnabled = options.GlowEnabled end
-    if options.GlowIntensity then esp.Settings.GlowIntensity = options.GlowIntensity end
-    if options.GlowSpread then esp.Settings.GlowSpread = options.GlowSpread end
-    if options.GlowColor then esp.Settings.GlowColor = options.GlowColor end
-    
     customESPs[id] = esp
     return id
 end
 
 function Library.Custom:Remove(id)
     local esp = customESPs[id]
-    if esp then
-        esp:Cleanup()
-        customESPs[id] = nil
-    end
+    if esp then esp:Cleanup(); customESPs[id] = nil end
 end
 
 function Library.Custom:RemoveAll()
     for id, esp in pairs(customESPs) do
-        esp:Cleanup()
-        customESPs[id] = nil
+        esp:Cleanup(); customESPs[id] = nil
     end
 end
 
-function Library.Custom:Get(id)
-    return customESPs[id]
-end
-
+function Library.Custom:Get(id) return customESPs[id] end
 function Library.Custom:SetText(id, text)
     local esp = customESPs[id]
     if esp then
-        if type(text) == "function" then
-            esp.GetText = text
-        else
-            local txt = tostring(text)
-            esp.GetText = function() return txt end
-        end
+        if type(text) == "function" then esp.GetText = text
+        else local t = tostring(text); esp.GetText = function() return t end end
     end
 end
-
 function Library.Custom:SetPosition(id, pos)
     local esp = customESPs[id]
     if esp then
-        if type(pos) == "function" then
-            esp.GetPosition = pos
-        elseif typeof(pos) == "Vector3" then
-            local v = pos
-            esp.GetPosition = function() return v end
-        end
+        if type(pos) == "function" then esp.GetPosition = pos
+        elseif typeof(pos) == "Vector3" then local v = pos; esp.GetPosition = function() return v end end
     end
 end
-
 function Library.Custom:SetAnimated(id, state)
     local esp = customESPs[id]
     if esp then esp.Settings.Animated = state end
 end
-
-function Library.Custom:SetColors(id, color1, color2)
+function Library.Custom:SetColors(id, c1, c2)
     local esp = customESPs[id]
-    if esp then
-        esp.Settings.Color1 = color1
-        esp.Settings.Color2 = color2
-    end
+    if esp then esp.Settings.Color1 = c1; esp.Settings.Color2 = c2 end
 end
-
-function Library.Custom:SetStaticColor(id, color)
-    local esp = customESPs[id]
-    if esp then esp.Settings.StaticColor = color end
-end
-
 function Library.Custom:SetEnabled(id, state)
     local esp = customESPs[id]
     if esp then esp.Enabled = state end
 end
-
 function Library.Custom:SetVisible(id, state)
     local esp = customESPs[id]
     if esp then esp.Visible = state end
-end
-
-function Library.Custom:SetGlowEnabled(id, state)
-    local esp = customESPs[id]
-    if esp then esp.Settings.GlowEnabled = state end
-end
-
-function Library.Custom:SetGlowSettings(id, intensity, spread, color)
-    local esp = customESPs[id]
-    if esp then
-        if intensity then esp.Settings.GlowIntensity = intensity end
-        if spread then esp.Settings.GlowSpread = spread end
-        if color then esp.Settings.GlowColor = color end
-    end
 end
 
 return Library
