@@ -1,8 +1,7 @@
 --[[
-    Hologram ESP Library v2.0
-    - Fixed text offset when camera moves
-    - Added Animated toggle
-    - Clean library structure
+    Hologram ESP Library v2.1
+    - Fixed 'Destroying' error
+    - Safe cleanup
 ]]
 
 local Players = game:GetService("Players")
@@ -21,15 +20,15 @@ local SETTINGS = {
     OutlineColor = Color3.fromRGB(0, 0, 0),
     
     -- Animation
-    Animated = true,            -- Toggle animation on/off
-    GradientSpeed = 1.5,        -- Speed of gradient scroll
+    Animated = true,
+    GradientSpeed = 1.5,
     
     -- Colors for gradient
-    Color1 = Color3.fromRGB(105, 245, 66),   -- Green
-    Color2 = Color3.fromRGB(255, 255, 255),  -- White
+    Color1 = Color3.fromRGB(105, 245, 66),
+    Color2 = Color3.fromRGB(255, 255, 255),
     
     -- Static color (when animation is off)
-    StaticColor = Color3.fromRGB(255, 255, 255),  -- White
+    StaticColor = Color3.fromRGB(255, 255, 255),
     
     -- Visibility
     MaxDistance = 1000,
@@ -63,23 +62,21 @@ end
 
 function ESP:Cleanup()
     for _, text in ipairs(self.CharTexts) do
-        text:Remove()
+        pcall(function() text:Remove() end)
     end
     for _, text in ipairs(self.OutlineTexts) do
-        text:Remove()
+        pcall(function() text:Remove() end)
     end
     table.clear(self.CharTexts)
     table.clear(self.OutlineTexts)
 end
 
 function ESP:EnsureCharCount(count)
-    -- Remove excess
     while #self.CharTexts > count do
-        table.remove(self.CharTexts):Remove()
-        table.remove(self.OutlineTexts):Remove()
+        pcall(function() table.remove(self.CharTexts):Remove() end)
+        pcall(function() table.remove(self.OutlineTexts):Remove() end)
     end
     
-    -- Add missing
     while #self.CharTexts < count do
         local outline = Drawing.new("Text")
         outline.Font = SETTINGS.Font
@@ -108,7 +105,6 @@ function ESP:Render(now, camera)
         return
     end
     
-    -- Get text
     local displayText = ""
     if self.GetText then
         local success, result = pcall(self.GetText)
@@ -122,7 +118,6 @@ function ESP:Render(now, camera)
         return
     end
     
-    -- Get world position
     local worldPosition = nil
     if self.GetPosition then
         local success, result = pcall(self.GetPosition)
@@ -136,13 +131,11 @@ function ESP:Render(now, camera)
         return
     end
     
-    -- Settings
     local yOffset = self.Settings.YOffset or SETTINGS.YOffset
     local maxDistance = self.Settings.MaxDistance or SETTINGS.MaxDistance
     local animated = self.Settings.Animated
     if animated == nil then animated = SETTINGS.Animated end
     
-    -- Distance check
     local camPos = camera.CFrame.Position
     local distance = (camPos - worldPosition).Magnitude
     if distance > maxDistance then
@@ -150,7 +143,6 @@ function ESP:Render(now, camera)
         return
     end
     
-    -- World to screen
     local headPos = worldPosition + Vector3.new(0, yOffset, 0)
     local screenPos, onScreen = camera:WorldToViewportPoint(headPos)
     
@@ -159,69 +151,61 @@ function ESP:Render(now, camera)
         return
     end
     
-    -- Prepare text
     local textLength = math.min(#displayText, 64)
     self:EnsureCharCount(textLength)
     
-    -- Character width calculation (FIXED: use actual text bounds for centering)
     local charWidth = SETTINGS.Size * 0.6
-    
-    -- Scale with distance
     local scale = math.clamp(1 - (distance / maxDistance), 0.3, 1)
     local finalSize = math.floor(SETTINGS.Size * scale)
     local finalCharWidth = charWidth * scale
     
-    -- FIXED CENTERING: calculate total width and center properly
     local totalWidth = finalCharWidth * textLength
-    local startX = screenPos.X - totalWidth / 2 + finalCharWidth / 2  -- + half char to center first char
+    local startX = screenPos.X - totalWidth / 2 + finalCharWidth / 2
     
-    -- Colors
     local color1 = self.Settings.Color1 or SETTINGS.Color1
     local color2 = self.Settings.Color2 or SETTINGS.Color2
     local staticColor = self.Settings.StaticColor or SETTINGS.StaticColor
     
-    -- Gradient phase
     local gradientPhase = (now * SETTINGS.GradientSpeed) % 1
     
     for i = 1, textLength do
         local char = displayText:sub(i, i)
         local charX = startX + (i - 1) * finalCharWidth
         
-        -- Determine color
         local color
         if animated then
-            -- Animated gradient
             local normalizedPos = textLength > 1 and (i - 1) / (textLength - 1) or 0.5
             local gradientPos = (normalizedPos + gradientPhase) % 1
             color = lerpColor(color1, color2, gradientPos)
         else
-            -- Static color
             color = staticColor
         end
         
         local isVisible = SETTINGS.Visible and SETTINGS.Enabled
         
-        -- Outline (behind)
-        self.OutlineTexts[i].Position = Vector2.new(charX, screenPos.Y)
-        self.OutlineTexts[i].Text = char
-        self.OutlineTexts[i].Size = finalSize + 2
-        self.OutlineTexts[i].Visible = isVisible
+        if self.OutlineTexts[i] then
+            self.OutlineTexts[i].Position = Vector2.new(charX, screenPos.Y)
+            self.OutlineTexts[i].Text = char
+            self.OutlineTexts[i].Size = finalSize + 2
+            self.OutlineTexts[i].Visible = isVisible
+        end
         
-        -- Main text
-        self.CharTexts[i].Position = Vector2.new(charX, screenPos.Y)
-        self.CharTexts[i].Text = char
-        self.CharTexts[i].Size = finalSize
-        self.CharTexts[i].Color = color
-        self.CharTexts[i].Visible = isVisible
+        if self.CharTexts[i] then
+            self.CharTexts[i].Position = Vector2.new(charX, screenPos.Y)
+            self.CharTexts[i].Text = char
+            self.CharTexts[i].Size = finalSize
+            self.CharTexts[i].Color = color
+            self.CharTexts[i].Visible = isVisible
+        end
     end
 end
 
 function ESP:Hide()
     for _, text in ipairs(self.CharTexts) do
-        text.Visible = false
+        if text then text.Visible = false end
     end
     for _, text in ipairs(self.OutlineTexts) do
-        text.Visible = false
+        if text then text.Visible = false end
     end
 end
 
@@ -229,6 +213,7 @@ end
 local playerESPs = {}
 local customESPs = {}
 local customIdCounter = 0
+local renderConnection = nil
 
 -- ===== PLAYER ESP =====
 local function createPlayerESP(player)
@@ -259,47 +244,77 @@ local function renderAll()
     
     local now = tick()
     
-    -- Player ESPs
     for _, esp in pairs(playerESPs) do
         esp:Render(now, camera)
     end
     
-    -- Custom ESPs
     for _, esp in pairs(customESPs) do
         esp:Render(now, camera)
     end
 end
 
--- ===== PLAYER EVENTS =====
-local function onPlayerAdded(player)
-    if player == LocalPlayer then return end
-    createPlayerESP(player)
+-- ===== START/STOP =====
+local function startRender()
+    if renderConnection then return end
+    renderConnection = RunService:BindToRenderStep("HologramESP", Enum.RenderPriority.Last.Value + 1, renderAll)
 end
 
-local function onPlayerRemoving(player)
-    local esp = playerESPs[player]
-    if esp then
-        esp:Cleanup()
-        playerESPs[player] = nil
+local function stopRender()
+    if renderConnection then
+        RunService:UnbindFromRenderStep("HologramESP")
+        renderConnection = nil
     end
 end
 
--- Init existing players
+-- Auto-start
+startRender()
+
+-- ===== PLAYER EVENTS =====
+local playerAddedConn = nil
+local playerRemovingConn = nil
+
+local function connectPlayerEvents()
+    if playerAddedConn then return end
+    
+    playerAddedConn = Players.PlayerAdded:Connect(function(player)
+        if player == LocalPlayer then return end
+        createPlayerESP(player)
+    end)
+    
+    playerRemovingConn = Players.PlayerRemoving:Connect(function(player)
+        local esp = playerESPs[player]
+        if esp then
+            esp:Cleanup()
+            playerESPs[player] = nil
+        end
+    end)
+end
+
+local function disconnectPlayerEvents()
+    if playerAddedConn then
+        playerAddedConn:Disconnect()
+        playerAddedConn = nil
+    end
+    if playerRemovingConn then
+        playerRemovingConn:Disconnect()
+        playerRemovingConn = nil
+    end
+end
+
+-- Init
+connectPlayerEvents()
+
 for _, player in ipairs(Players:GetPlayers()) do
     if player ~= LocalPlayer then
         createPlayerESP(player)
     end
 end
 
-Players.PlayerAdded:Connect(onPlayerAdded)
-Players.PlayerRemoving:Connect(onPlayerRemoving)
-
--- ===== BIND TO RENDER =====
-RunService:BindToRenderStep("HologramESP", Enum.RenderPriority.Last.Value + 1, renderAll)
-
 -- ===== CLEANUP =====
-script.Destroying:Connect(function()
-    RunService:UnbindFromRenderStep("HologramESP")
+local function fullCleanup()
+    stopRender()
+    disconnectPlayerEvents()
+    
     for _, esp in pairs(playerESPs) do
         esp:Cleanup()
     end
@@ -308,12 +323,25 @@ script.Destroying:Connect(function()
     end
     table.clear(playerESPs)
     table.clear(customESPs)
+end
+
+-- Safe destroy handling
+pcall(function()
+    if script then
+        script.Destroying:Connect(fullCleanup)
+    end
+end)
+
+-- Also clean up on game close
+game:GetService("Players").PlayerRemoving:Connect(function(player)
+    if player == LocalPlayer then
+        fullCleanup()
+    end
 end)
 
 -- ===== PUBLIC API =====
 local Library = {}
 
--- Global settings
 function Library:SetEnabled(state)
     SETTINGS.Enabled = state
 end
@@ -359,29 +387,13 @@ function Library:SetOutlineColor(color)
     SETTINGS.OutlineColor = color
 end
 
+function Library:Destroy()
+    fullCleanup()
+end
+
 -- ===== CUSTOM ESP API =====
 Library.Custom = {}
 
---[[
-    Add custom text ESP
-    
-    Options:
-    {
-        Object = Instance,          -- Object to track (uses .Position)
-        Text = "Hello" | function(),-- Static text or function returning text
-        Position = Vector3 | func(),-- World position or function returning Vector3
-        Animated = true/false,      -- Override global animation setting
-        Color1 = Color3,            -- Gradient color 1
-        Color2 = Color3,            -- Gradient color 2
-        StaticColor = Color3,       -- Color when animation is off
-        YOffset = number,           -- Vertical offset
-        MaxDistance = number,       -- Max render distance
-        Enabled = true/false,
-        Visible = true/false,
-    }
-    
-    Returns: ESP ID (number)
-]]
 function Library.Custom:Add(options)
     if not options then return nil end
     
@@ -391,7 +403,6 @@ function Library.Custom:Add(options)
     local esp = ESP.new()
     esp.ID = id
     
-    -- Text getter
     if type(options.Text) == "function" then
         esp.GetText = options.Text
     elseif options.Text ~= nil then
@@ -401,7 +412,6 @@ function Library.Custom:Add(options)
         esp.GetText = function() return "Object" end
     end
     
-    -- Position getter
     if options.Object and typeof(options.Object) == "Instance" then
         local obj = options.Object
         esp.GetPosition = function()
@@ -423,7 +433,6 @@ function Library.Custom:Add(options)
         esp.GetPosition = function() return nil end
     end
     
-    -- Custom settings
     if options.Animated ~= nil then esp.Settings.Animated = options.Animated end
     if options.Color1 then esp.Settings.Color1 = options.Color1 end
     if options.Color2 then esp.Settings.Color2 = options.Color2 end
@@ -482,9 +491,7 @@ end
 
 function Library.Custom:SetAnimated(id, state)
     local esp = customESPs[id]
-    if esp then
-        esp.Settings.Animated = state
-    end
+    if esp then esp.Settings.Animated = state end
 end
 
 function Library.Custom:SetColors(id, color1, color2)
@@ -497,9 +504,7 @@ end
 
 function Library.Custom:SetStaticColor(id, color)
     local esp = customESPs[id]
-    if esp then
-        esp.Settings.StaticColor = color
-    end
+    if esp then esp.Settings.StaticColor = color end
 end
 
 function Library.Custom:SetEnabled(id, state)
