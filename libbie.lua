@@ -1,8 +1,7 @@
 --[[
-    Hologram ESP Library v3.0 - With Glow Effect
-    - Glow effect using multiple outline layers
-    - Smooth animation
-    - Custom objects support
+    Hologram ESP Library v3.1 - Text Glow Effect
+    - Glow on the text itself (not outline)
+    - Blur-like glow using multiple offset layers
 ]]
 
 local Players = game:GetService("Players")
@@ -20,11 +19,11 @@ local SETTINGS = {
     Outline = true,
     OutlineColor = Color3.fromRGB(0, 0, 0),
     
-    -- Glow effect
+    -- Text Glow effect
     GlowEnabled = true,
-    GlowIntensity = 3,          -- How many glow layers (1-5, more = smoother)
-    GlowSize = 2,               -- How far glow extends (pixels per layer)
-    GlowTransparency = 0.7,     -- Base glow transparency
+    GlowIntensity = 4,          -- How many glow layers (1-8, more = smoother)
+    GlowSpread = 1.5,           -- How far glow spreads (pixels between layers)
+    GlowTransparency = 0.6,     -- Base transparency of glow layers
     GlowColor = nil,            -- nil = use text color, or set custom Color3
     
     -- Animation
@@ -52,24 +51,15 @@ local function lerpColor(a, b, t)
     )
 end
 
--- Darken color for glow layers
-local function darkenColor(color, amount)
-    return Color3.new(
-        color.R * amount,
-        color.G * amount,
-        color.B * amount
-    )
-end
-
 -- ===== ESP OBJECT =====
 local ESP = {}
 ESP.__index = ESP
 
 function ESP.new()
     local self = setmetatable({}, ESP)
-    self.CharTexts = {}          -- Main text layer
+    self.CharTexts = {}          -- Main text (top layer)
     self.OutlineTexts = {}       -- Black outline
-    self.GlowLayers = {}         -- Glow layers (multiple per character)
+    self.GlowTexts = {}          -- Glow text layers (behind main text)
     self.Enabled = true
     self.Visible = true
     self.Settings = {}
@@ -86,19 +76,17 @@ function ESP:Cleanup()
     for _, text in ipairs(self.OutlineTexts) do
         pcall(function() text:Remove() end)
     end
-    for _, layer in ipairs(self.GlowLayers) do
-        for _, text in ipairs(layer) do
-            pcall(function() text:Remove() end)
-        end
+    for _, glowText in ipairs(self.GlowTexts) do
+        pcall(function() glowText:Remove() end)
     end
     table.clear(self.CharTexts)
     table.clear(self.OutlineTexts)
-    table.clear(self.GlowLayers)
+    table.clear(self.GlowTexts)
     self.LastTextLength = 0
 end
 
-function ESP:EnsureCharCount(count, glowIntensity)
-    glowIntensity = glowIntensity or 0
+function ESP:EnsureCharCount(count, glowCount)
+    glowCount = glowCount or 0
     
     -- Main characters
     while #self.CharTexts > count do
@@ -109,12 +97,14 @@ function ESP:EnsureCharCount(count, glowIntensity)
         text.Font = SETTINGS.Font
         text.Size = SETTINGS.Size
         text.Outline = true
+        text.OutlineColor = Color3.fromRGB(0, 0, 0)
         text.Center = true
         text.Visible = false
+        text.ZIndex = 10  -- Top layer
         table.insert(self.CharTexts, text)
     end
     
-    -- Outlines
+    -- Outlines (thin black border around main text)
     while #self.OutlineTexts > count do
         pcall(function() table.remove(self.OutlineTexts):Remove() end)
     end
@@ -127,42 +117,24 @@ function ESP:EnsureCharCount(count, glowIntensity)
         outline.Outline = false
         outline.Center = true
         outline.Visible = false
+        outline.ZIndex = 9  -- Behind main text
         table.insert(self.OutlineTexts, outline)
     end
     
-    -- Glow layers
-    while #self.GlowLayers > glowIntensity do
-        local layer = table.remove(self.GlowLayers)
-        for _, text in ipairs(layer) do
-            pcall(function() text:Remove() end)
-        end
+    -- Glow text layers (rendered behind, offset in different directions)
+    -- Each layer is a full copy of the text, slightly offset and transparent
+    while #self.GlowTexts > glowCount do
+        pcall(function() table.remove(self.GlowTexts):Remove() end)
     end
-    while #self.GlowLayers < glowIntensity do
-        local layer = {}
-        for i = 1, count do
-            local glow = Drawing.new("Text")
-            glow.Font = SETTINGS.Font
-            glow.Outline = false
-            glow.Center = true
-            glow.Visible = false
-            table.insert(layer, glow)
-        end
-        table.insert(self.GlowLayers, layer)
-    end
-    
-    -- Adjust glow layers to match count
-    for _, layer in ipairs(self.GlowLayers) do
-        while #layer > count do
-            pcall(function() table.remove(layer):Remove() end)
-        end
-        while #layer < count do
-            local glow = Drawing.new("Text")
-            glow.Font = SETTINGS.Font
-            glow.Outline = false
-            glow.Center = true
-            glow.Visible = false
-            table.insert(layer, glow)
-        end
+    while #self.GlowTexts < glowCount do
+        local glow = Drawing.new("Text")
+        glow.Font = SETTINGS.Font
+        glow.Size = SETTINGS.Size
+        glow.Outline = false
+        glow.Center = true
+        glow.Visible = false
+        glow.ZIndex = 1  -- Far behind
+        table.insert(self.GlowTexts, glow)
     end
 end
 
@@ -208,9 +180,10 @@ function ESP:Render(now, camera)
     if glowEnabled == nil then glowEnabled = SETTINGS.GlowEnabled end
     
     local glowIntensity = glowEnabled and (self.Settings.GlowIntensity or SETTINGS.GlowIntensity) or 0
-    glowIntensity = math.clamp(glowIntensity, 0, 5)
+    glowIntensity = math.clamp(glowIntensity, 0, 8)
     
-    local glowSize = self.Settings.GlowSize or SETTINGS.GlowSize
+    local glowSpread = self.Settings.GlowSpread or SETTINGS.GlowSpread
+    local glowTransparency = self.Settings.GlowTransparency or SETTINGS.GlowTransparency
     
     local camPos = camera.CFrame.Position
     local distance = (camPos - worldPosition).Magnitude
@@ -228,8 +201,25 @@ function ESP:Render(now, camera)
     end
     
     local textLength = math.min(#displayText, 64)
-    self:EnsureCharCount(textLength, glowIntensity)
+    
+    -- We only need 1 glow text object (we'll render glow per-character differently)
+    self:EnsureCharCount(textLength, 0)  -- No extra glow text objects needed
     self.LastTextLength = textLength
+    
+    -- But we need glow objects for each character
+    -- Actually, let's use a different approach: per-character glow layers
+    while #self.GlowTexts < (textLength * glowIntensity) do
+        local glow = Drawing.new("Text")
+        glow.Font = SETTINGS.Font
+        glow.Outline = false
+        glow.Center = true
+        glow.Visible = false
+        glow.ZIndex = 1
+        table.insert(self.GlowTexts, glow)
+    end
+    while #self.GlowTexts > (textLength * glowIntensity) do
+        pcall(function() table.remove(self.GlowTexts):Remove() end)
+    end
     
     local charWidth = SETTINGS.Size * 0.6
     local scale = math.clamp(1 - (distance / maxDistance), 0.3, 1)
@@ -247,7 +237,7 @@ function ESP:Render(now, camera)
     local gradientPhase = (now * SETTINGS.GradientSpeed) % 1
     local isVisible = SETTINGS.Visible and SETTINGS.Enabled
     
-    -- Pre-calculate colors for each character
+    -- Calculate colors for each character
     local charColors = {}
     for i = 1, textLength do
         if animated then
@@ -259,41 +249,39 @@ function ESP:Render(now, camera)
         end
     end
     
-    -- Render glow layers first (behind main text)
-    for layerIdx = 1, glowIntensity do
-        local layer = self.GlowLayers[layerIdx]
-        if not layer then continue end
-        
-        -- Calculate glow size and transparency for this layer
-        -- Outer layers are bigger and more transparent
-        local layerProgress = layerIdx / glowIntensity
-        local layerSize = finalSize + (glowSize * layerIdx)
-        local layerTransparency = 1 - ((1 - SETTINGS.GlowTransparency) * (1 - layerProgress * 0.8))
-        
-        for i = 1, textLength do
-            if layer[i] then
-                local char = displayText:sub(i, i)
-                local charX = startX + (i - 1) * finalCharWidth
-                
-                -- Glow color (use character color or custom glow color)
-                local gColor = glowColor or charColors[i]
-                
-                layer[i].Position = Vector2.new(charX, screenPos.Y)
-                layer[i].Text = char
-                layer[i].Size = layerSize
-                layer[i].Color = gColor
-                layer[i].Transparency = layerTransparency
-                layer[i].Visible = isVisible
-            end
-        end
+    -- Hide all glow texts first
+    for _, glow in ipairs(self.GlowTexts) do
+        glow.Visible = false
     end
     
-    -- Hide unused glow layers
-    for layerIdx = glowIntensity + 1, #self.GlowLayers do
-        local layer = self.GlowLayers[layerIdx]
-        if layer then
-            for _, text in ipairs(layer) do
-                text.Visible = false
+    -- Render glow layers (behind main text, offset in different directions)
+    local glowIndex = 1
+    for charIdx = 1, textLength do
+        local char = displayText:sub(charIdx, charIdx)
+        local charX = startX + (charIdx - 1) * finalCharWidth
+        local charColor = glowColor or charColors[charIdx]
+        
+        -- Create glow for this character with multiple offset layers
+        for layerIdx = 1, glowIntensity do
+            if glowIndex <= #self.GlowTexts then
+                local glow = self.GlowTexts[glowIndex]
+                
+                -- Calculate offset direction (spread out in circle pattern)
+                local angle = (layerIdx - 1) * (math.pi * 2 / glowIntensity)
+                local offsetX = math.cos(angle) * glowSpread * layerIdx * 0.5
+                local offsetY = math.sin(angle) * glowSpread * layerIdx * 0.5
+                
+                -- More transparent the further out
+                local layerAlpha = 1 - (layerIdx / glowIntensity) * glowTransparency
+                
+                glow.Position = Vector2.new(charX + offsetX, screenPos.Y + offsetY)
+                glow.Text = char
+                glow.Size = finalSize
+                glow.Color = charColor
+                glow.Transparency = 1 - layerAlpha
+                glow.Visible = isVisible
+                
+                glowIndex = glowIndex + 1
             end
         end
     end
@@ -333,10 +321,8 @@ function ESP:Hide()
     for _, text in ipairs(self.OutlineTexts) do
         if text then text.Visible = false end
     end
-    for _, layer in ipairs(self.GlowLayers) do
-        for _, text in ipairs(layer) do
-            if text then text.Visible = false end
-        end
+    for _, text in ipairs(self.GlowTexts) do
+        if text then text.Visible = false end
     end
 end
 
@@ -514,17 +500,17 @@ function Library:SetOutlineColor(color)
     SETTINGS.OutlineColor = color
 end
 
--- Glow API
+-- Text Glow API
 function Library:SetGlowEnabled(state)
     SETTINGS.GlowEnabled = state
 end
 
 function Library:SetGlowIntensity(intensity)
-    SETTINGS.GlowIntensity = math.clamp(intensity, 1, 5)
+    SETTINGS.GlowIntensity = math.clamp(intensity, 1, 8)
 end
 
-function Library:SetGlowSize(size)
-    SETTINGS.GlowSize = math.clamp(size, 1, 5)
+function Library:SetGlowSpread(spread)
+    SETTINGS.GlowSpread = math.clamp(spread, 0.5, 5)
 end
 
 function Library:SetGlowTransparency(transparency)
@@ -590,10 +576,10 @@ function Library.Custom:Add(options)
     if options.Enabled ~= nil then esp.Enabled = options.Enabled end
     if options.Visible ~= nil then esp.Visible = options.Visible end
     
-    -- Glow settings per object
+    -- Glow settings
     if options.GlowEnabled ~= nil then esp.Settings.GlowEnabled = options.GlowEnabled end
     if options.GlowIntensity then esp.Settings.GlowIntensity = options.GlowIntensity end
-    if options.GlowSize then esp.Settings.GlowSize = options.GlowSize end
+    if options.GlowSpread then esp.Settings.GlowSpread = options.GlowSpread end
     if options.GlowColor then esp.Settings.GlowColor = options.GlowColor end
     
     customESPs[id] = esp
@@ -676,11 +662,11 @@ function Library.Custom:SetGlowEnabled(id, state)
     if esp then esp.Settings.GlowEnabled = state end
 end
 
-function Library.Custom:SetGlowSettings(id, intensity, size, color)
+function Library.Custom:SetGlowSettings(id, intensity, spread, color)
     local esp = customESPs[id]
     if esp then
         if intensity then esp.Settings.GlowIntensity = intensity end
-        if size then esp.Settings.GlowSize = size end
+        if spread then esp.Settings.GlowSpread = spread end
         if color then esp.Settings.GlowColor = color end
     end
 end
