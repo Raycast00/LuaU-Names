@@ -1,9 +1,7 @@
 --[[
-    Hologram ESP Library v2.2 - Clean version
-    - Animated gradient names
-    - Black outline
-    - Custom objects support
-    - No glow bullshit
+    Hologram ESP Library v2.1
+    - Fixed 'Destroying' error
+    - Safe cleanup
 ]]
 
 local Players = game:GetService("Players")
@@ -12,8 +10,8 @@ local LocalPlayer = Players.LocalPlayer
 
 -- ===== SETTINGS =====
 local SETTINGS = {
-    Enabled = false,
-    Visible = false,
+    Enabled = true,
+    Visible = true,
     
     -- Text settings
     Font = Drawing.Fonts.UI,
@@ -169,7 +167,6 @@ function ESP:Render(now, camera)
     local staticColor = self.Settings.StaticColor or SETTINGS.StaticColor
     
     local gradientPhase = (now * SETTINGS.GradientSpeed) % 1
-    local isVisible = SETTINGS.Visible and SETTINGS.Enabled
     
     for i = 1, textLength do
         local char = displayText:sub(i, i)
@@ -183,6 +180,8 @@ function ESP:Render(now, camera)
         else
             color = staticColor
         end
+        
+        local isVisible = SETTINGS.Visible and SETTINGS.Enabled
         
         if self.OutlineTexts[i] then
             self.OutlineTexts[i].Position = Vector2.new(charX, screenPos.Y)
@@ -267,6 +266,7 @@ local function stopRender()
     end
 end
 
+-- Auto-start
 startRender()
 
 -- ===== PLAYER EVENTS =====
@@ -301,6 +301,7 @@ local function disconnectPlayerEvents()
     end
 end
 
+-- Init
 connectPlayerEvents()
 
 for _, player in ipairs(Players:GetPlayers()) do
@@ -324,12 +325,14 @@ local function fullCleanup()
     table.clear(customESPs)
 end
 
+-- Safe destroy handling
 pcall(function()
     if script then
         script.Destroying:Connect(fullCleanup)
     end
 end)
 
+-- Also clean up on game close
 game:GetService("Players").PlayerRemoving:Connect(function(player)
     if player == LocalPlayer then
         fullCleanup()
@@ -339,18 +342,54 @@ end)
 -- ===== PUBLIC API =====
 local Library = {}
 
-function Library:SetEnabled(state) SETTINGS.Enabled = state end
-function Library:SetVisible(state) SETTINGS.Visible = state end
-function Library:SetAnimated(state) SETTINGS.Animated = state end
-function Library:SetGradientSpeed(speed) SETTINGS.GradientSpeed = speed end
-function Library:SetColors(color1, color2) SETTINGS.Color1 = color1; SETTINGS.Color2 = color2 end
-function Library:SetStaticColor(color) SETTINGS.StaticColor = color end
-function Library:SetSize(size) SETTINGS.Size = size end
-function Library:SetMaxDistance(dist) SETTINGS.MaxDistance = dist end
-function Library:SetYOffset(offset) SETTINGS.YOffset = offset end
-function Library:SetOutline(state) SETTINGS.Outline = state end
-function Library:SetOutlineColor(color) SETTINGS.OutlineColor = color end
-function Library:Destroy() fullCleanup() end
+function Library:SetEnabled(state)
+    SETTINGS.Enabled = state
+end
+
+function Library:SetVisible(state)
+    SETTINGS.Visible = state
+end
+
+function Library:SetAnimated(state)
+    SETTINGS.Animated = state
+end
+
+function Library:SetGradientSpeed(speed)
+    SETTINGS.GradientSpeed = speed
+end
+
+function Library:SetColors(color1, color2)
+    SETTINGS.Color1 = color1
+    SETTINGS.Color2 = color2
+end
+
+function Library:SetStaticColor(color)
+    SETTINGS.StaticColor = color
+end
+
+function Library:SetSize(size)
+    SETTINGS.Size = size
+end
+
+function Library:SetMaxDistance(dist)
+    SETTINGS.MaxDistance = dist
+end
+
+function Library:SetYOffset(offset)
+    SETTINGS.YOffset = offset
+end
+
+function Library:SetOutline(state)
+    SETTINGS.Outline = state
+end
+
+function Library:SetOutlineColor(color)
+    SETTINGS.OutlineColor = color
+end
+
+function Library:Destroy()
+    fullCleanup()
+end
 
 -- ===== CUSTOM ESP API =====
 Library.Custom = {}
@@ -377,10 +416,11 @@ function Library.Custom:Add(options)
         local obj = options.Object
         esp.GetPosition = function()
             if not obj or not obj.Parent then return nil end
-            if obj:IsA("BasePart") then return obj.Position end
-            if obj:IsA("Model") then
-                local p = obj.PrimaryPart
-                return p and p.Position
+            if obj:IsA("BasePart") then
+                return obj.Position
+            elseif obj:IsA("Model") then
+                local primary = obj.PrimaryPart
+                return primary and primary.Position
             end
             return nil
         end
@@ -408,42 +448,70 @@ end
 
 function Library.Custom:Remove(id)
     local esp = customESPs[id]
-    if esp then esp:Cleanup(); customESPs[id] = nil end
+    if esp then
+        esp:Cleanup()
+        customESPs[id] = nil
+    end
 end
 
 function Library.Custom:RemoveAll()
     for id, esp in pairs(customESPs) do
-        esp:Cleanup(); customESPs[id] = nil
+        esp:Cleanup()
+        customESPs[id] = nil
     end
 end
 
-function Library.Custom:Get(id) return customESPs[id] end
+function Library.Custom:Get(id)
+    return customESPs[id]
+end
+
 function Library.Custom:SetText(id, text)
     local esp = customESPs[id]
     if esp then
-        if type(text) == "function" then esp.GetText = text
-        else local t = tostring(text); esp.GetText = function() return t end end
+        if type(text) == "function" then
+            esp.GetText = text
+        else
+            local txt = tostring(text)
+            esp.GetText = function() return txt end
+        end
     end
 end
+
 function Library.Custom:SetPosition(id, pos)
     local esp = customESPs[id]
     if esp then
-        if type(pos) == "function" then esp.GetPosition = pos
-        elseif typeof(pos) == "Vector3" then local v = pos; esp.GetPosition = function() return v end end
+        if type(pos) == "function" then
+            esp.GetPosition = pos
+        elseif typeof(pos) == "Vector3" then
+            local v = pos
+            esp.GetPosition = function() return v end
+        end
     end
 end
+
 function Library.Custom:SetAnimated(id, state)
     local esp = customESPs[id]
     if esp then esp.Settings.Animated = state end
 end
-function Library.Custom:SetColors(id, c1, c2)
+
+function Library.Custom:SetColors(id, color1, color2)
     local esp = customESPs[id]
-    if esp then esp.Settings.Color1 = c1; esp.Settings.Color2 = c2 end
+    if esp then
+        esp.Settings.Color1 = color1
+        esp.Settings.Color2 = color2
+    end
 end
+
+function Library.Custom:SetStaticColor(id, color)
+    local esp = customESPs[id]
+    if esp then esp.Settings.StaticColor = color end
+end
+
 function Library.Custom:SetEnabled(id, state)
     local esp = customESPs[id]
     if esp then esp.Enabled = state end
 end
+
 function Library.Custom:SetVisible(id, state)
     local esp = customESPs[id]
     if esp then esp.Visible = state end
