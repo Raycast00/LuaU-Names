@@ -1,9 +1,3 @@
---[[
-    Hologram ESP Library v2.1
-    - Fixed 'Destroying' error
-    - Safe cleanup
-]]
-
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
